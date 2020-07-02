@@ -1,0 +1,362 @@
+---
+title: "Training Iteration"
+author: "Kim Julia Fuchs"
+date: "27 3 2020"
+output: html_document
+---
+
+# Learnings and Best practices
+* **use container objects: allocate an object to hold the results and fill it in during the loop**
+* Don’t use a loop when a vectorized alternative already exists
+* for apply functions always state FUN = explicitly; makes it easier to read
+
+
+# Introduction to iterations 
+* **Functions** reduce duplication by identifying repeated patterns of code and extract them 
+out into independent pieces that can be easily reused and updated.
+* *Iterations* help if you need to do the same thing to multiple inputs: 
+repeating the same operation on different columns, or on different data sets.
+* In R you have three main options to do iterations: 
+  + vectorized operations (w/ base R or purrr::map functions)
+  + for loops 
+  + apply functions 
+
+# for loops
+* **for loops are preferable where the output of one iteration depends on the result of the previous iteration**
+* syntax: for (i in M) {}
+
+## M: the iteratable
+  + vector object that you will parsing through in a for loop
+  + this object does not change while the for loop is being executed
+  + if you are running a loop by numbers, you'll probably want to use seq() or seq_along()
+  + if you are running a loop by specific values, you can just use c() function to type values manually 
+  
+## i: the iterator (loop) variable
+  + variable which **stores a portion of the iterable when the for loop is being executed**
+  + each time the loop iterates, **the value of the iterator variable will change to a different portion of the iterable**
+  + i.e., the same holds for the datatype, which changes according to the datatypes in the iteratable:
+    + e.g. if iterator variable is index for seq_along(M), i will be an integer in the sequence 1:length(M)
+    + e.g. if iterator variable is index for M =c('class', 'course', 'MOOC'), i will be a string, namely, class, course and MOOC for the iterations
+    + e.g. if iterator variable is index for M = list('class', 8, 'MOOC', 3), i will be a string or integer
+* naming: usually, iterator variable is just a letter
+  + however, in some cases it might make sense to make it more descriptive
+  + e.g. if you iterate over participants you could write participants.i
+* **frequent iterator variables**: 
+  + seq_along(): i in seq_along(x)
+  + seq_len(): e.g. 1:seq_len(x)
+  + dim(): 1:dim(<df>)[1] to iterate over rows; 1:dim(<df>)[2] to iterate over columns
+
+## Exp. for loop: random walk with runif
+```{r}
+randomwalk <- function(n, p, drift) {
+  #' Random walk time series 
+  #' 
+  #' This function provides a random sample of a random walk time series based probabilities drawn from continuous uniform distribution (runif)
+  #' @param n = number of observations. Must be integer
+  #' @param p = probability for up or down movement; i.e. if p = 0.5, then time series moves up by +1 when probability randomly drawn from runif is > 0.5 and does not move at all when probability is < 0.5. Must be within [0,1]
+  #' @param drift random walk with or without drift. 
+  x <-  double(length = n+1) # we have to provide vector of length n+1 as x[1] is set in advance and we iteration n times 
+  x[1] <- drift # x_1 is set as 0, so starting value of iteration is either 0 or drift, if the latter is defined 
+  p <- p
+  for (i in 1:n){
+    if (runif(1, 0, 1) > p) {
+      x[i+1] <- x[i]+1 
+      } else {
+       x[i+1] <- x[i]-1
+      } 
+  }
+  return(x)
+}
+# docstring(randomwalk)
+plot(randomwalk(100, 0.5, 3), type = 'l')
+```
+
+```{r}
+# random walk is defined as x_t = c+ x_t-1 + u_t with u_t iid normally distributed with N(0,sigma_squared) [as per assumption]
+set.seed(12)
+randomwalk_nd <- function(n, drift, sd) {
+  x <- numeric(length = n)
+  x[1] <- drift + rnorm(1, 25, 1)  + rnorm(1, mean= 0, sd = sd) # randomly initialize 
+  for (t in 2:n) { # we start at x_2, with x_1 being randomly drawn from standard normal distribution + drift
+  x[t] <- x[t-1] + rnorm(1, mean= 0, sd = sd)  
+  }
+  return(x)
+}
+randomwalk_nd(200,30, 2)
+plot(randomwalk_nd(200,30, 2), type = 'l')
+
+
+# vectorized alternative: cumsum()
+# dazu betrachten wir random walk zeitreihe in der rücksubstituierten form: 
+# x_t = x_0 + summe_i=1_t(u_i)
+randomwalk_nd2 <- function(n, drift, sd) {
+  x <- numeric(length = n)
+  x[1] <- drift + rnorm(1, 25, 1)  + rnorm(1, mean= 0, sd = sd) # randomly initialize 
+  x[2:n] <- rnorm(n-1,mean = 0, sd=sd)
+  x <- cumsum(x)
+  return(x)
+}
+randomwalk_nd2(200,30,2)
+plot(randomwalk_nd2(200,30, 2), type = 'l')
+
+```
+
+## container objects 
+* in very rare cases it will be sufficient to only print these output values of the Loop
+* in most cases we want to save them in an object
+* in general, one should avoid growing objects inside of a loop
+* we do so by creating a container object outside the loop before you start the loop
+* **container objects best practices:**
+  + 
+  
+### Exp. random sample from uniform distribution
+* note: the following code is redundant, bcs runif itself allows us to draw random samples, i.e. for illustration purposes only 
+```{r}
+sample <- vector(mode = "double", length =200)
+system.time(for (i in 1:100) {
+  sample[i] <- runif(n = 1, min= 0,max= 1)
+})
+sample
+# time: 0
+sample2 <- NULL
+system.time(for (i in 1:1000) {
+  sample2 <- c(sample2,runif(n = 1, min= 0,max= 1) )  
+})
+# time: 0.02
+```
+
+# apply functions
+* obviously, (for) loops can be used to repeat evaluating an expression with an iterator over a vector or list 
+* in practice, however, the (for) loop is almost always the last choice bcs an alternative way (apply functions) is much cleaner and easier to write and read, **when each iteration is independent of each other**
+* the apply functions do run a for-loop in the background, however, they do it in the C programming language, which makes them a little faster than regular for loops
+* interesting fact: apply functions are based on the fact that in R, functions are treated as regular objects and can be passed around as arguments
+* each apply-family function is a so-called **higher-order function** that accepts a function as an argument
+* **all apply functions have in common, that the order of iteration is not important**
+* therefore, **some argue that for, while and repeat should only be used, when the order of operations is important**
+
+## Exp. p. 170 for loop vs. lapply
+```{r}
+# create a list of three independent, normally distributed random vectors whose length is specified by vector len = c(3,4,5)
+## with for loop
+len <- c(3,4,5)
+# create container:
+x <- list()
+# create for loop
+for(i in 1:3) {
+  x[[i]] <- rnorm(len[i]) # rnorm has default for mean (0) and sd(1)
+}
+x
+
+## with lapply
+lapply(len, rnorm) # lapply applies rnorm on each element in len and puts each result in a list
+```
+## function arguments applying to lapply, sapply and vapply: 
++ **X**: a vector (atomic or list) or an expression object, containing the elements that form the input to FUN
++ **FUN**: function to be applied to each element of x; In the case of functions like +, %*%, the function name must be backquoted or quoted
+  + FUN is found by a call to match.fun(): match.fun = when it is called inside functions that in turn take a function as argument, it extracts the desired function object while avoiding undesired matching to objects of other types 
+  + FUN is typically specified as a function or a character string specifying a function to be searched fro in the environment of the call 
+  + obviously, FUN must be able to accept as input any of the elements of x
+* **...**: optional arguments to FUN, i.e. **parameters that can be provided to the function**
+  + arguments in ... cannot have the same name as any of the other arguments 
+  + **in general the following is good pratice:**
+    + name the first two arguments X and FUN if ... is passed through 
+    + this both, avoids partial matching to FUN and ensures that a sensible error message is given 
+      
+## lapply (list-apply; list as container)
+* applies a function to **each element of a list or vector** and collects results in a list
+* lapply is **great for building analysis pipelines**, such as: 
+first.step <- lapply(x, fun1)
+second.step <- lapply(first.step, next.function)
+
+* **syntax: lapply(X, FUN, ...)**
+  * output: list containing each result (i.e. same number of elements as in X)
+```{r}
+# syntax lapply w/ custom function
+# assume we have a list of students with information about name, age, gender and interest stored in vectors
+lapply(students, function(s) {
+  type <- switch(s$gender, "M" = "man", "F" = "woman")
+  interest <- paste0(s$interest, collapse = ", ")
+  sprintf("%s, %d year-old %s, loves %s.", s$name, s$age, type, interest)
+  })
+```
+* note I: **function does not have to incorporate actual dataset** (students)
+  + **apply functions are designed in a way that whatever function is provided (in-built or custom), first argument provided is seen as data and 'grabbed' by the function**
+
+```{r}
+cities <- c("Melbourne", "Sydney", "Brisbane", "Cairns")
+urls <- sprintf("http://nicercode.github.io/guides/repeating-things/data/%s.csv", cities)
+urls
+
+download_nonexist <- function(url, fetch = FALSE, path = ".") {
+  dest <- file.path(path, basename(url)) # basename is a neat function that strips away the path until and including the last path delimiter (e.g. /,\)
+  if (fetch || !file.exists(dest))# file.exists returns a logical vector indicating whether the files named by its argument exist
+    download.file(url, dest) # download.file is a base function used to download files from web
+  dest
+}
+
+path <- 'data_nicercode/weatherdata'
+dir.create(path, showWarnings = FALSE) 
+# dir.create creates directories and folders
+# because I am in a project, it will automatically be created on the respective path 
+
+files <- sapply(urls, download_nonexist, path = path) #*
+names(files) <- cities # as both are character vectors, we can just overwrite one character vector with another
+```
+* note II: 
+  + we pass the 'path' argument to every function call
+  + so as if it was written as follows: 
+  download.maybe(urls[[1]], path=path)
+  download.maybe(urls[[2]], path=path)
+  download.maybe(urls[[3]], path=path)
+  download.maybe(urls[[4]], path=path)
+  + arguments are not to be inserted intp download_nonexist function -> this will yield an error
+
+## sapply (simplify-apply)
+* a list is not always a favorable container for the results
+* sometimes we want them to be put in a simple vector or matrix 
+* sapply also applies a function to a list (or vector), but tries to simplify the output if possible
+* outputs vector or matrix
+
+* **syntax: sapply(X, FUN, ..., simplify = TRUE, USE.NAMES = TRUE)**
+  + X: a vector (atomic or list) or an expression object
+  + FUN: function to be applied to each element of x; In the case of functions like +, %*%, the function name must be backquoted or quoted
+  + simplify: logical (e.g. TRUE) or character string (e.g. 'array'); should the result be simplified to a vector, matrix or higher dimensional array if possible? 
+    + for sapply it must be named, i.e. we need to state simplify = ...
+  + USE.NAMES: logical; if TRUE and if X is character, use X as names for the result unless it had names already
+    
+```{r}
+# suppose one applies square to each element in a vector
+# w/ lapply we get a list with single-element vectors for each square
+# with sapply: 
+d <- c(2,4,4)
+sapply(d, function(i) i^2)
+```
+## mapply (multivariate sapply)
+* while lapply and sapply iterate over one vector, mapply() iterates over multiple vectors
+* **syntax: mapply(FUN, ..., MoreArgs = NULL, SIMPLIFY = TRUE, USE.NAMES = TRUE)**
+  + mapply calls FUN for the values of ... (re-cycled to the length of the longest), considered by the arguments given in MoreArgs
+  +...: arguments **to vectorize over** (vectors or lists of strictly positive length)
+  + MoreArgs: **a list of other arguments to FUN**
+```{r}
+mapply(function(s, t, u) s * t + t * u + s * u, s = c(1, 2, 3), t = c(5, 6, 7), u = c(-1, -2, -3))
+```
+```{r}
+df <- data.frame(x = c(1, 2, 3), y = c(3, 4, 5))
+df
+```
+```{r}
+mapply(function(x, y) c(x, y, x + y), df$x, df$y)
+```
+
+## vapply (value-apply)
+* the vapply() function has an additional argument that specifies the template of the returned value from each iteration
+* i.e. vapply has a pre-specified type of return value, so it can be safer (and sometimes faster) to use
+
+* **syntax: vapply(X, FUN, FUN.VALUE, ..., USE.NAMES = TRUE)**
+  + x: a vector (atomic or list) or an expression object 
+  + FUN: function to be applied to each element of x
+  + FUN.VALUE: a template for the return value from FUN; format: <datatype (i.e.  logical, integer, double, complex)>(<length>)
+* vapply returns a vector (atomic or list) or array of type matching the FUN.VALUE 
+  + if length(FUN.VALUE) ==1, then a vector of the same length as X is returned, otherwise an array
+  + if FUN is not an array, the result is a matrix with length(FUN.VALUE) rows and length(x) columns
+  
+* see when vapply is > sapply in following example:
+```{r}
+# sapply is very handy and smart, the smartness may sometimes become a risk
+# assume we have following list 
+d <- list(c(1, 2), c(2, 3), c(1, 3))
+# If we want to get a numeric vector of the squared numbers for each number in x, sapply
+# can be easy to use because it automatically tries to simplify the data structure of the result_ 
+sapply(d, function(i) i ^2)
+```
+```{r}
+# sapply coerces into matrix with results per column for each list element
+# however, if the input data has some mistakes or corruption, sapply() will silently accept the input and may return an unexpected value
+# For example, let's assume that the third element of x has mistakenly got an additional element
+d1 <- list(c(1, 2), c(2, 3), c(1, 3, 3))
+# Then, sapply() finds that it can no longer be simplified to a matrix and thus returns a list
+sapply(d1, function(i) i^2)
+```
+```{r}
+# If we use vapply() in the first place, the mistake will be spotted very soon
+vapply(d1, function(i) i^2, numeric(2)) # numeric vector with 2 elements
+```
+
+# Map() function 
+* multivariate version of lapply, i.e. **it produces a list**
+```{r}
+Map(function(x, y) c(x, y, x + y), df$x, df$y)
+```
+
+# apply function (most important for data prep/engineering)
+* apply(x, margin, fun, ..)
+  + x: an array, incl. matrix
+  + margin: vector containing the dimensions over which function should be applied 
+    + for matrix/dataframe: **1** indicates **row**, **2** indicates **col**, **c(1,2)** indicates **both rows and columns**
+  + fun: function to be applied; **in case of functions like +, %/% etc., function must be backquoted or quoted**
+* output: *(named) array of dimension c(n, dim(x))* and n = length of FUN vector
+```{r}
+mat2 <- as.data.frame(matrix(1:16, nrow = 4))
+mat2
+```
+```{r}
+# min-max per column
+view(apply(mat2,2, function(i) c(min = min(i), max = max(i))))
+is.matrix(apply(mat2,2, function(i) c(min = min(i), max = max(i)))) # True
+is.data.frame(apply(mat2,2, function(i) c(min = min(i), max = max(i))))# False
+
+# min-max per row
+apply(mat2,1, function(i) c(min = min(i), max = max(i)))
+
+# NOTE: we do not have to access rows/cols in df with subsetting operators, because we already indicate which dimension to use by using the margin argument
+```
+## dplyr's *_if, *_all, *_at* functions as alternative
+* https://dplyr.tidyverse.org/reference/summarise_all.html
+
+```{r}
+mat2 %>% summarize_all(funs(min = min(.), max = max(.)))
+```
+* differences in layout: 
+* dplyrs functions creates new columns of the original df
+ + therefore, columns are created in accordance with funs
+* apply function creates an array with dimension c(n, dim(x))* and n = length of FUN vector
+  + therefore, when input is df, output is df with named rows and names = funs
+
+* system time: dplyr's multivariate family is way faster than apply
+```{r}
+system.time(mat2 %>% summarize_all(funs(min = min(.), max = max(.)))) #0
+system.time(apply(mat2,2, function(i) c(min = min(i), max = max(i)))) #0.05
+```
+
+## map() from purr; 
+*from Hadley: purrr enhances R’s functional programming (FP) toolkit by providing a complete and consistent set of tools for working with functions and vectors. If you’ve never heard of FP before, the best place to start is the family of map() functions which allow you to replace many for loops with code that is both more succinct and easier to read
+
+* map always returns a list
+
+
+# Exercises
+## Fizzbuzz for sequence values
+```{r}
+# with modular operator for (random) sequence of numbers: you need a for-loop (or sapply afterwards)
+# Source for following code: https://www.natedayta.com/2018/09/15/fizz-buzz-whatever-in-r/
+
+c_fizzbuzz <- function(x, rules) {
+  container <- rep("", length(x))
+  for (name in names(rules)) {
+    s_id_x <- x%%rules[name] == 0 # creates logical vector w/ TRUE if division by 3 (5, 7 etc) yields no rest; loop over dividend/rule
+    container <- ifelse(s_id_x, paste0(container, name), container) #if s_id_x TRUE, concatenate name (fizz, buzz, kuzz etc.) with (in the beginning empty) entries in container; else keep entry in container
+  }
+  s_id_x <- container == "" # check where container is empty
+  container <- ifelse(s_id_x,x,container) # if container element empty TRUE, use value of x, else use value in container
+  return(container)
+} 
+x <- seq(1:15)
+rules <- c("fizz" = 3, "buzz" = 5)
+c_fizzbuzz(x, rules)
+rules2 <- c("fizz" = 3, "buzz" = 5, 'kuzz' = 15)
+rules3 <- c("fizz" = 3, 'kuzz' = 15, "buzz" = 5)
+c_fizzbuzz(x, rules2) #fizzbuzzkuzz
+c_fizzbuzz(x, rules3) #fizzkuzzbuzz
+```
+
+
